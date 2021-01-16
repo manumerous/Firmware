@@ -50,14 +50,18 @@ class Manager;
 class SubscriptionCallback;
 }
 
+namespace uORBTest
+{
+class UnitTest;
+}
+
 /**
  * Per-object device instance.
  */
 class uORB::DeviceNode : public cdev::CDev, public IntrusiveSortedListNode<uORB::DeviceNode *>
 {
 public:
-	DeviceNode(const struct orb_metadata *meta, const uint8_t instance, const char *path, ORB_PRIO priority,
-		   uint8_t queue_size = 1);
+	DeviceNode(const struct orb_metadata *meta, const uint8_t instance, const char *path, uint8_t queue_size = 1);
 	virtual ~DeviceNode();
 
 	// no copy, assignment, move, move assignment
@@ -119,8 +123,8 @@ public:
 	static int        unadvertise(orb_advert_t handle);
 
 #ifdef ORB_COMMUNICATOR
-	static int16_t topic_advertised(const orb_metadata *meta, ORB_PRIO priority);
-	//static int16_t topic_unadvertised(const orb_metadata *meta, ORB_PRIO priority);
+	static int16_t topic_advertised(const orb_metadata *meta);
+	//static int16_t topic_unadvertised(const orb_metadata *meta);
 
 	/**
 	 * processes a request for add subscription from remote
@@ -189,7 +193,18 @@ public:
 
 	int8_t subscriber_count() const { return _subscriber_count; }
 
-	unsigned published_message_count() const { return _generation.load(); }
+	/**
+	 * Returns the number of updated data relative to the parameter 'generation'
+	 * We can get the correct value regardless of wrap-around or not.
+	 * @param generation The generation of subscriber
+	 */
+	unsigned updates_available(unsigned generation) const { return _generation.load() - generation; }
+
+	/**
+	 * Return the initial generation to the subscriber
+	 * @return The initial generation.
+	 */
+	unsigned get_initial_generation();
 
 	const orb_metadata *get_meta() const { return _meta; }
 
@@ -198,9 +213,6 @@ public:
 	const char *get_name() const { return _meta->o_name; }
 
 	uint8_t get_instance() const { return _instance; }
-
-	ORB_PRIO get_priority() const { return (ORB_PRIO)_priority; }
-	void set_priority(ORB_PRIO priority) { _priority = priority; }
 
 	/**
 	 * Copies data and the corresponding generation
@@ -228,52 +240,17 @@ protected:
 	void poll_notify_one(px4_pollfd_struct_t *fds, px4_pollevent_t events) override;
 
 private:
-
-	/**
-	 * Copies data and the corresponding generation
-	 * from a node to the buffer provided. Caller handles locking.
-	 *
-	 * @param dst
-	 *   The buffer into which the data is copied.
-	 * @param generation
-	 *   The generation that was copied.
-	 * @return bool
-	 *   Returns true if the data was copied.
-	 */
-	bool copy_locked(void *dst, unsigned &generation) const;
-
-	struct UpdateIntervalData {
-		uint64_t last_update{0}; /**< time at which the last update was provided, used when update_interval is nonzero */
-		unsigned interval{0}; /**< if nonzero minimum interval between updates */
-	};
-
-	struct SubscriberData {
-		~SubscriberData() { if (update_interval) { delete (update_interval); } }
-
-		unsigned generation{0}; /**< last generation the subscriber has seen */
-		UpdateIntervalData *update_interval{nullptr}; /**< if null, no update interval */
-	};
+	friend uORBTest::UnitTest;
 
 	const orb_metadata *_meta; /**< object metadata information */
 
-	uint8_t     *_data{nullptr};   /**< allocated object buffer */
+	uint8_t *_data{nullptr};   /**< allocated object buffer */
+	bool _data_valid{false}; /**< At least one valid data */
 	px4::atomic<unsigned>  _generation{0};  /**< object generation count */
 	List<uORB::SubscriptionCallback *>	_callbacks;
 
-	ORB_PRIO _priority;  /**< priority of the topic */
 	const uint8_t _instance; /**< orb multi instance identifier */
 	bool _advertised{false};  /**< has ever been advertised (not necessarily published data yet) */
 	uint8_t _queue_size; /**< maximum number of elements in the queue */
 	int8_t _subscriber_count{0};
-
-	/**
-	 * Check whether a topic appears updated to a subscriber.
-	 *
-	 * Lock must already be held when calling this.
-	 *
-	 * @param sd    The subscriber for whom to check.
-	 * @return    True if the topic should appear updated to the subscriber
-	 */
-	bool      appears_updated(cdev::file_t *filp);
-
 };
